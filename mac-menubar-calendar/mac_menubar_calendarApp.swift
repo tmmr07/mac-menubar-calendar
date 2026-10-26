@@ -8,10 +8,12 @@
 import SwiftUI
 
 @main
-struct mac_menubar_calendarApp: App {
+struct MenuBarApp: App {
     var body: some Scene {
-        WindowGroup {
+        MenuBarExtra("My App", systemImage: "calendar") {
+            // メニューバーのアイコンをクリックした時に展開されるビュー
             ContentView()
         }
+        .menuBarExtraStyle(.window) // .windowにするとポップオーバー風のUIになります
     }
 }
