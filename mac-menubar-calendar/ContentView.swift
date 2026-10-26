@@ -6,19 +6,29 @@ struct ContentView: View {
     var body: some View {
         VStack {
             if authManager.isAuthenticated {
-                // 認証成功時のUI：取得したカレンダーの予定を表示
                 VStack {
                     HStack {
                         Text("直近の予定")
                             .font(.headline)
                         Spacer()
-                        // 手動更新ボタン
+                        
+                        // 【追加】ログアウトボタン
+                        Button(action: {
+                            authManager.logout()
+                        }) {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 8)
+                        .help("ログアウト")
+                        
                         Button(action: {
                             authManager.fetchCalendarEvents()
                         }) {
                             Image(systemName: "arrow.clockwise")
                         }
                         .buttonStyle(.plain)
+                        .help("更新")
                     }
                     .padding(.horizontal)
                     .padding(.top, 8)
@@ -29,7 +39,6 @@ struct ContentView: View {
                                 .font(.body)
                                 .bold()
                             
-                            // 時間がある場合と終日の場合で表示を分ける
                             if let dateTime = event.start?.dateTime {
                                 Text(dateTime.prefix(16).replacingOccurrences(of: "T", with: " "))
                                     .font(.caption)
@@ -44,11 +53,9 @@ struct ContentView: View {
                     .listStyle(.sidebar)
                 }
                 .onAppear {
-                    // 画面が表示された瞬間に自動で予定を取得
                     authManager.fetchCalendarEvents()
                 }
             } else {
-                // 認証前のUI
                 Image(systemName: "calendar.badge.exclamationmark")
                     .imageScale(.large)
                     .foregroundStyle(.red)
@@ -61,7 +68,6 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
             }
         }
-        // メニューバーアプリのウィンドウサイズを指定（リスト表示用に高さを拡張）
         .frame(width: 300, height: 400)
     }
 }
