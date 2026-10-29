@@ -133,7 +133,6 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
     private func fetchCalendarEvents() {
         guard let token = accessToken else { return }
         
-        // 今日の0時から明後日の0時までを取得範囲に設定
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: Date())
         let dayAfterTomorrow = calendar.date(byAdding: .day, value: 2, to: todayStart)!
@@ -148,6 +147,9 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        // 【追加】カレンダーもキャッシュを無視して毎回最新を取得する
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
@@ -175,15 +177,19 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
     private func fetchTasks() {
         guard let token = accessToken else { return }
         
-        // 未完了のタスクを取得（@defaultリストから）
-        let urlString = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?showCompleted=false"
+        // 取得漏れを防ぐための設定（maxResults=100 & showHidden=true）は残します
+        let urlString = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?showCompleted=false&maxResults=100&showHidden=true"
         guard let url = URL(string: urlString) else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
+        // キャッシュを無視して毎回最新を取得する設定も残します
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        
         URLSession.shared.dataTask(with: request) { data, response, error in
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 { return } // カレンダー側でリフレッシュを処理するためここは無視
+            // カレンダー側で期限切れ（401）の更新処理を行うため、ここではリターンのみ
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 { return }
             guard let data = data, error == nil else { return }
             
             DispatchQueue.main.async {
