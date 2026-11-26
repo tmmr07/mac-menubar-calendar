@@ -2,8 +2,6 @@
 //  mac_menubar_calendarApp.swift
 //  mac-menubar-calendar
 //
-//  Created by k22129kk on 2026/10/26.
-//
 
 import SwiftUI
 

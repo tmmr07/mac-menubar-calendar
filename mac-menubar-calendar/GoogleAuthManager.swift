@@ -12,11 +12,15 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
     @Published var isAuthenticated = false
     @Published var accessToken: String?
     
-    // UI表示用にデータを分割して保持
+    // Googleから取得するデータ（今日・明日）
     @Published var todayEvents: [CalendarEvent] = []
     @Published var tomorrowEvents: [CalendarEvent] = []
     @Published var todayTasks: [TaskItem] = []
     @Published var tomorrowTasks: [TaskItem] = []
+    
+    // アプリ内で独自に追加・保存するデータ（4列目：今後）
+    @Published var customTasks: [CustomTask] = []
+    @Published var customEvents: [CustomEvent] = []
     
     let clientID = Secrets.clientID
     let clientSecret = Secrets.clientSecret
@@ -28,6 +32,8 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
     
     private let accessTokenKey = "google_access_token"
     private let refreshTokenKey = "google_refresh_token"
+    private let customTasksKey = "local_custom_tasks"
+    private let customEventsKey = "local_custom_events"
     
     override init() {
         super.init()
@@ -35,6 +41,8 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
             self.accessToken = savedToken
             self.isAuthenticated = true
         }
+        // 保存されている独自タスクと予定を読み込む
+        loadCustomData()
     }
     
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
@@ -42,7 +50,6 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
     }
     
     func signIn() {
-        // カレンダーとタスクの読み取り権限
         let scope = "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks.readonly"
         let encodedScope = scope.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         
@@ -124,7 +131,6 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
         }.resume()
     }
     
-    // カレンダーとタスクの両方を取得
     func fetchAllData() {
         fetchCalendarEvents()
         fetchTasks()
@@ -133,6 +139,7 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
     private func fetchCalendarEvents() {
         guard let token = accessToken else { return }
         
+        // 今日の0時から明後日の0時まで（今日と明日分）を取得
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: Date())
         let dayAfterTomorrow = calendar.date(byAdding: .day, value: 2, to: todayStart)!
@@ -147,8 +154,6 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        
-        // 【追加】カレンダーもキャッシュを無視して毎回最新を取得する
         request.cachePolicy = .reloadIgnoringLocalCacheData
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -177,18 +182,14 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
     private func fetchTasks() {
         guard let token = accessToken else { return }
         
-        // 取得漏れを防ぐための設定（maxResults=100 & showHidden=true）は残します
         let urlString = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?showCompleted=false&maxResults=100&showHidden=true"
         guard let url = URL(string: urlString) else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        
-        // キャッシュを無視して毎回最新を取得する設定も残します
         request.cachePolicy = .reloadIgnoringLocalCacheData
         
         URLSession.shared.dataTask(with: request) { data, response, error in
-            // カレンダー側で期限切れ（401）の更新処理を行うため、ここではリターンのみ
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 { return }
             guard let data = data, error == nil else { return }
             
@@ -204,7 +205,6 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
         }.resume()
     }
     
-    // 予定を今日と明日に振り分け
     private func distributeEvents(_ events: [CalendarEvent]) {
         let calendar = Calendar.current
         var today: [CalendarEvent] = []
@@ -220,32 +220,86 @@ class GoogleAuthManager: NSObject, ObservableObject, ASWebAuthenticationPresenta
                 tomorrow.append(event)
             }
         }
+        
         self.todayEvents = today
         self.tomorrowEvents = tomorrow
     }
     
-    // タスクを今日（過去含む）と明日に振り分け
     private func distributeTasks(_ tasks: [TaskItem]) {
         let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        let tomorrowStart = calendar.date(byAdding: .day, value: 1, to: todayStart)!
+        
         var today: [TaskItem] = []
         var tomorrow: [TaskItem] = []
-        let todayStart = calendar.startOfDay(for: Date())
         
         for task in tasks {
             guard let dueString = task.due, let dueDate = parseTaskDate(dueString) else { continue }
             
             if calendar.isDateInTomorrow(dueDate) {
                 tomorrow.append(task)
-            } else if dueDate < calendar.date(byAdding: .day, value: 1, to: todayStart)! {
-                // 今日が期限、またはすでに期限切れのタスク
+            } else if dueDate < tomorrowStart {
                 today.append(task)
             }
         }
+        
         self.todayTasks = today
         self.tomorrowTasks = tomorrow
     }
     
-    // 日付パース用のヘルパー
+    // MARK: - 独自タスク・予定の管理（4列目用）
+    
+    func addCustomTask(title: String, dueDate: Date, category: TaskCategory) {
+        let newTask = CustomTask(title: title, dueDate: dueDate, category: category)
+        customTasks.append(newTask)
+        // 期限が短い（早い）順にソート
+        customTasks.sort { $0.dueDate < $1.dueDate }
+        saveCustomTasks()
+    }
+    
+    func deleteCustomTask(id: UUID) {
+        customTasks.removeAll { $0.id == id }
+        saveCustomTasks()
+    }
+    
+    func addCustomEvent(title: String, startDate: Date, endDate: Date) {
+        let newEvent = CustomEvent(title: title, startDate: startDate, endDate: endDate)
+        customEvents.append(newEvent)
+        // 開始日時が早い順にソート
+        customEvents.sort { $0.startDate < $1.startDate }
+        saveCustomEvents()
+    }
+    
+    func deleteCustomEvent(id: UUID) {
+        customEvents.removeAll { $0.id == id }
+        saveCustomEvents()
+    }
+    
+    private func saveCustomTasks() {
+        if let encoded = try? JSONEncoder().encode(customTasks) {
+            UserDefaults.standard.set(encoded, forKey: customTasksKey)
+        }
+    }
+    
+    private func saveCustomEvents() {
+        if let encoded = try? JSONEncoder().encode(customEvents) {
+            UserDefaults.standard.set(encoded, forKey: customEventsKey)
+        }
+    }
+    
+    private func loadCustomData() {
+        if let taskData = UserDefaults.standard.data(forKey: customTasksKey),
+           let decodedTasks = try? JSONDecoder().decode([CustomTask].self, from: taskData) {
+            self.customTasks = decodedTasks.sorted { $0.dueDate < $1.dueDate }
+        }
+        if let eventData = UserDefaults.standard.data(forKey: customEventsKey),
+           let decodedEvents = try? JSONDecoder().decode([CustomEvent].self, from: eventData) {
+            self.customEvents = decodedEvents.sorted { $0.startDate < $1.startDate }
+        }
+    }
+    
+    // MARK: - ヘルパー
+    
     private func parseDate(_ string: String) -> Date? {
         let isoFormatter = ISO8601DateFormatter()
         if let d = isoFormatter.date(from: string) { return d }
