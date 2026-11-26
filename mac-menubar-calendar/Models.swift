@@ -4,13 +4,14 @@
 //
 
 import Foundation
+import SwiftUI
 
-// カレンダーAPIのレスポンス全体
+// MARK: - Google API用モデル
+
 struct CalendarResponse: Decodable {
     let items: [CalendarEvent]?
 }
 
-// 個別の予定データ
 struct CalendarEvent: Identifiable, Decodable {
     let id: String
     let summary: String?
@@ -19,18 +20,50 @@ struct CalendarEvent: Identifiable, Decodable {
 }
 
 struct EventDateTime: Decodable {
-    let dateTime: String? // 時間指定がある場合
-    let date: String?     // 終日の場合
+    let dateTime: String?
+    let date: String?
 }
 
-// --- 追加: タスクAPIのレスポンス全体 ---
 struct TaskResponse: Decodable {
     let items: [TaskItem]?
 }
 
-// 個別のタスクデータ
 struct TaskItem: Identifiable, Decodable {
     let id: String
     let title: String?
-    let due: String? // "2023-10-26T00:00:00.000Z" のような形式
+    let due: String?
+}
+
+// MARK: - アプリ独自追加用モデル（4列目用）
+
+enum TaskCategory: String, CaseIterable, Codable, Identifiable {
+    case thesis = "修論"
+    case correction = "添削"
+    case jobHunting = "就活"
+    case other = "その他"
+    
+    var id: String { self.rawValue }
+    
+    var color: Color {
+        switch self {
+        case .thesis: return .red
+        case .correction: return .green
+        case .jobHunting: return .cyan // 水色
+        case .other: return .purple
+        }
+    }
+}
+
+struct CustomTask: Identifiable, Codable {
+    var id = UUID()
+    var title: String
+    var dueDate: Date
+    var category: TaskCategory
+}
+
+struct CustomEvent: Identifiable, Codable {
+    var id = UUID()
+    var title: String
+    var startDate: Date
+    var endDate: Date
 }
